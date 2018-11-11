@@ -38,14 +38,15 @@ void setup()
 	display.setBrightness(0x00, true);
 	uint8_t data[] = { 0b01001001, 0b01001001, 0b01001001, 0b01001001 };
 	display.setSegments(data);
-	if (!WiFi.config(local_IP, gateway, subnet)) {Serial.println("STA Failed to configure");}
+	if (myIP[3]>0) {if (!WiFi.config(local_IP, gateway, subnet)) {Serial.println("STA Failed to configure");}}
 	Serial.print("Connecting to ");
 	Serial.print(ssid);
 	WiFi.begin(ssid, password);
 	while (WiFi.status() != WL_CONNECTED) {delay(500); Serial.print(".");}
 	Serial.print("WiFi connected. IP address: ");
 	Serial.println(WiFi.localIP());
-	display.showNumberDecEx(myIP[3], 0b00000000, false, 4, 0);
+	String ip=WiFi.localIP().toString(); ip=ip.substring(ip.lastIndexOf('.')+1,ip.length());
+	display.showNumberDecEx(ip.toInt(), 0b00000000, false, 4, 0);
 	blink(1,800);
 	server.begin();
 	dht.begin();
