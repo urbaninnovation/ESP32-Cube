@@ -53,7 +53,7 @@ void setup()
 
 void loop(){
 	art(0,0);
-	if (abs(millis()-timeflag)>stepms) {timeflag = millis(); temp=read_dht22(); if (temp>0&&temp<10000) {updateDisplay(temp);};}
+	if (abs(millis()-timeflag)>stepms && art_z<1) {timeflag = millis(); temp=read_dht22(); if (temp>0&&temp<10000) {updateDisplay(temp);};}
 
 	WiFiClient client = server.available();
 	if (client) {                         
@@ -84,7 +84,7 @@ void loop(){
 					else if (currentLine.equals("GET /L ")) {digitalWrite(2, LOW); res=assambleRES();}
 					else if (currentLine.equals("GET /ON ")) {display.setBrightness(0x00, true); res=assambleRES();}
 					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
-					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(480,80);}
+					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
 				}
 			}
 		}
