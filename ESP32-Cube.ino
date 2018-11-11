@@ -84,7 +84,7 @@ void loop(){
 					else if (currentLine.equals("GET /L ")) {digitalWrite(2, LOW); res=assambleRES();}
 					else if (currentLine.equals("GET /ON ")) {display.setBrightness(0x00, true); res=assambleRES();}
 					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
-					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(48,80);}
+					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(480,80);}
 				}
 			}
 		}
@@ -95,7 +95,7 @@ void loop(){
 String assambleRES() {
 	++counter;
 	art(12,40);
-	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32</a><br>Click <a href=\"/H\">here</a> to turn the LED on.<br>Click <a href=\"/L\">here</a> to turn the LED off.<br><br>TEMP: "
+	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br>TEMP: "
 	+String(temp)
 	+"<br>COUNTER: "
 	+String(counter)
@@ -105,7 +105,6 @@ String assambleRES() {
 void art(int z, int d) {
 	if (z>0||d>0) {art_z=z; art_d=d;} 
 	else if (art_z>0) {
-		Serial.print('.');
 		if (abs(millis()-art_timestamp)>art_d) {
 			art_z--;
 			art_timestamp=millis();
@@ -114,7 +113,6 @@ void art(int z, int d) {
 				if (art_data[a]==0b01000000) {art_data[a]=0b00000001;}
 			}
 			display.setSegments(art_data);
-			Serial.println(art_z);
 			if (art_z<=0) {updateDisplay(counter);}
 		}
 	}
