@@ -1,154 +1,139 @@
 #include <WiFi.h>
-const char* ssid     = "abc";
-const char* password = "abc";
+#include "config.h"
+const char* ssid     = SSID;
+const char* password = PWD;
 WiFiServer server(80);
+byte myIP[] = IP;
+IPAddress local_IP(myIP[0],myIP[1],myIP[2],myIP[3]);
+byte myGW[] = GATEWAY;
+IPAddress gateway(myGW[0],myGW[1],myGW[2],myGW[3]);
+byte mySN[] = SUBNET;
+IPAddress subnet(mySN[0],mySN[1],mySN[2],mySN[3]);
 
-IPAddress local_IP(192, 168, 1, 110);
-IPAddress gateway(192, 168, 1, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8); //optional
-IPAddress secondaryDNS(8, 8, 4, 4); //optional
-
-#include "DHT.h"
-#define DHTPIN 23     // what digital pin we're connected to
-#define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
+#include <DHT.h>
+#define DHTPIN 23
+#define DHTTYPE DHT22 // DHT 22 (AM2302), AM2321
 DHT dht(DHTPIN, DHTTYPE);
 
 #include <TM1637Display.h>
-#define CLK 19 // GRUEN
-#define DIO 21 // GELB
+#define CLK 19
+#define DIO 21
 TM1637Display display(CLK, DIO);
 
-int t = 0;
-unsigned long time2;
+unsigned long timeflag = 0; // millis at last update
+int counter = 0; // current counter
+int temp = 0; // current temperature
+int number=0; // current number on display
+int stepms=5000; // ms to wait between updates
+int art_z=0;
+int art_d=0;
+unsigned long art_timestamp=0;
+byte art_data[] = { 0b00000001, 0b00000010, 0b00000100, 0b00001000 };
 
 void setup()
 {
-    Serial.begin(115200);
-    dht.begin();
-
-    pinMode(2, OUTPUT);      // set the LED pin mode
-
-    if (!WiFi.config(local_IP, gateway, subnet)) {
-      Serial.println("STA Failed to configure");
-    }
-    
-    delay(10);
-
-    Serial.println();
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-
-    WiFi.begin(ssid, password);
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-
-    Serial.println("");
-    Serial.println("WiFi connected.");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    server.begin();
-
-    blink(5,250);
-    
-    uint8_t data[] = { 0xff, 0xff, 0xff, 0xff };
-    display.setBrightness(0x0f);
-    // All segments on
-    display.setSegments(data);
+	Serial.begin(115200);
+	pinMode(2, OUTPUT);
+	blink(2,50);
+	display.setBrightness(0x00, true);
+	uint8_t data[] = { 0b01001001, 0b01001001, 0b01001001, 0b01001001 };
+	display.setSegments(data);
+	if (myIP[3]>0) {if (!WiFi.config(local_IP, gateway, subnet)) {Serial.println("STA Failed to configure");}}
+	Serial.print("Connecting to ");
+	Serial.print(ssid);
+	WiFi.begin(ssid, password);
+	while (WiFi.status() != WL_CONNECTED) {delay(500); Serial.print(".");}
+	Serial.print("WiFi connected. IP address: ");
+	Serial.println(WiFi.localIP());
+	String ip=WiFi.localIP().toString(); ip=ip.substring(ip.lastIndexOf('.')+1,ip.length());
+	display.showNumberDecEx(ip.toInt(), 0b00000000, false, 4, 0);
+	blink(1,800);
+	server.begin();
+	dht.begin();
 }
 
 void loop(){
-  WiFiClient client = server.available();
+	art(0,0);
+	if (abs(millis()-timeflag)>stepms && art_z<1) {timeflag = millis(); temp=read_dht22(); if (temp>0&&temp<10000) {updateDisplay(temp);};}
 
-  if ( (millis()>(time2+1000)) || (time2<1) )
-  {
-    time2 = millis();
-    //Serial.println(time2);
-    display.showNumberDec(t, false, 4);
-    int t_new=read_dht22();
-    if (t_new<10000) {t=t_new;}
-  }
+	WiFiClient client = server.available();
+	if (client) {                         
+		String currentLine = "";
+		String res = "";
+		while (client.connected()) {
+			if (client.available()) {
+				char c = client.read();
+				if (c == '\n') {
+					
+					if (currentLine.length() == 0) {
+						if (res.length()==0) {client.println("HTTP/1.1 404 NOT FOUND");}
+						else {
+							client.println("HTTP/1.1 200 OK");
+							client.println("Content-type:text/html");
+							client.println();
+							client.print(res);
+							blink(1,50);
+						}
+						break;
+					}
+					else {currentLine = "";}
 
-  
-  if (client) {                         
-    Serial.println("New Client.");
-    String currentLine = "";
-    while (client.connected()) {
-      if (client.available()) {
-        char c = client.read();
-        Serial.write(c);
-        if (c == '\n') {
-
-          if (currentLine.length() == 0) {
-            Serial.println("TEMP:"+String(t));
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println();
-            client.print("Click <a href=\"/H\">here</a> to turn the LED on.<br>");
-            client.print("Click <a href=\"/L\">here</a> to turn the LED off.<br>");
-            client.print("<br>TEMP: "+String(t));
-            client.println();
-            break;
-          } else {
-            currentLine = "";
-          }
-        } else if (c != '\r') {
-          currentLine += c;
-        }
-
-      
-        if (currentLine.endsWith("GET /H")) {
-          digitalWrite(2, HIGH);
-        }
-        if (currentLine.endsWith("GET /L")) {
-          digitalWrite(2, LOW);
-        }
-
-      }
-    }
-    client.stop();
-    Serial.println("Client Disconnected.");
-  }
+				} else if (c != '\r') {
+					currentLine += c;
+					if (currentLine.equals("GET / ")) {res=assambleRES();}
+					else if (currentLine.equals("GET /H ")) {digitalWrite(2, HIGH); res=assambleRES();}
+					else if (currentLine.equals("GET /L ")) {digitalWrite(2, LOW); res=assambleRES();}
+					else if (currentLine.equals("GET /ON ")) {display.setBrightness(0x00, true); res=assambleRES();}
+					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
+					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
+				}
+			}
+		}
+		client.stop();
+	}
 }
 
+String assambleRES() {
+	++counter;
+	art(12,40);
+	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br>TEMP: "
+	+String(temp)
+	+"<br>COUNTER: "
+	+String(counter)
+	+"</body></html>";
+}
+
+void art(int z, int d) {
+	if (z>0||d>0) {art_z=z; art_d=d;} 
+	else if (art_z>0) {
+		if (abs(millis()-art_timestamp)>art_d) {
+			art_z--;
+			art_timestamp=millis();
+			for (int a=0; a < 4; a++) {
+				art_data[a]=art_data[a]<<1;
+				if (art_data[a]==0b01000000) {art_data[a]=0b00000001;}
+			}
+			display.setSegments(art_data);
+			if (art_z<=0) {updateDisplay(counter);}
+		}
+	}
+}
 
 void blink(int z, int d) {
-   for (int i=0; i < z; i++){
-      digitalWrite(2, HIGH);
-      delay(d);
-      digitalWrite(2, LOW);
-      delay(d);
-   }
+	for (int i=0; i < z; i++){
+		digitalWrite(2, !digitalRead(2));
+		delay(d);
+		digitalWrite(2, !digitalRead(2));
+		delay(d);
+	}
 }
 
 int read_dht22() {
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-  float f = dht.readTemperature(true);
-  if (isnan(h) || isnan(t) || isnan(f)) {
-    Serial.println("Failed to read from DHT sensor!");
-  }
-  float hif = dht.computeHeatIndex(f, h);
-  float hic = dht.computeHeatIndex(t, h, false);
+	float t = dht.readTemperature();
+	//float h = dht.readHumidity();
+	return int(t*100);
+}
 
-  Serial.print("Humidity: ");
-  Serial.print(h);
-  Serial.print(" %\t");
-  Serial.print("Temperature: ");
-  Serial.print(t);
-  Serial.print(" *C ");
-  Serial.print(f);
-  Serial.print(" *F\t");
-  Serial.print("Heat index: ");
-  Serial.print(hic);
-  Serial.print(" *C ");
-  Serial.print(hif);
-  Serial.println(" *F");
-
-  //return String(t)+" Grad Celsius";
-  return int(t*100);
+void updateDisplay(int n) {
+	display.showNumberDec(n, false, 4);
 }
