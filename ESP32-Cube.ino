@@ -3,12 +3,21 @@
 const char* ssid     = SSID;
 const char* password = PWD;
 WiFiServer server(80);
-byte myIP[] = IP;
+byte myIP[] = IP; // { 0, 0, 0, 0 }
 IPAddress local_IP(myIP[0],myIP[1],myIP[2],myIP[3]);
-byte myGW[] = GATEWAY;
+byte myGW[] = GATEWAY; // { 192, 168, 1, 1 }
 IPAddress gateway(myGW[0],myGW[1],myGW[2],myGW[3]);
-byte mySN[] = SUBNET;
+byte mySN[] = SUBNET; // { 255, 255, 255, 0 }
 IPAddress subnet(mySN[0],mySN[1],mySN[2],mySN[3]);
+
+#define ESP32
+#include <SocketIOClient.h>
+SocketIOClient sIOclient;
+char host[] = SOCKETIOHOST; // "192.168.1.221"
+int port = SOCKETIOPORT; // 3000
+extern String RID;
+extern String Rname;
+extern String Rcontent;
 
 #include <DHT.h>
 #define DHTPIN 23
@@ -23,12 +32,12 @@ TM1637Display display(CLK, DIO);
 unsigned long timeflag = 0; // millis at last update
 int counter = 0; // current counter
 int temp = 0; // current temperature
-int number=0; // current number on display
 int stepms=5000; // ms to wait between updates
 int art_z=0;
 int art_d=0;
 unsigned long art_timestamp=0;
 byte art_data[] = { 0b00000001, 0b00000010, 0b00000100, 0b00001000 };
+bool sIOshouldBeConnected=false;
 
 void setup()
 {
@@ -47,14 +56,47 @@ void setup()
 	Serial.println(WiFi.localIP());
 	String ip=WiFi.localIP().toString(); ip=ip.substring(ip.lastIndexOf('.')+1,ip.length());
 	display.showNumberDecEx(ip.toInt(), 0b00000000, false, 4, 0);
+	
+	connectToSocketIO();
+
 	blink(1,800);
 	server.begin();
 	dht.begin();
 }
 
+void connectToSocketIO() {
+	if (sIOshouldBeConnected) {sIOclient.disconnect();}
+	if (!sIOclient.connect(host, port)) {
+		Serial.println("Failed to connect to SocketIO-server "+String(host));
+	}
+	if (sIOclient.connected()) {
+		Serial.println("Connected to SocketIO-server "+String(host));
+		sIOshouldBeConnected=true;
+	}	
+}
+
 void loop(){
 	art(0,0);
-	if (abs(millis()-timeflag)>stepms && art_z<1) {timeflag = millis(); temp=read_dht22(); if (temp>0&&temp<10000) {updateDisplay(temp);};}
+	if (abs(millis()-timeflag)>stepms) {
+		Serial.print('.');
+		timeflag = millis();
+		if (art_z<1) {temp=read_dht22(); if (temp!=0&&temp<10000) {Serial.println();Serial.println("TEMP: "+String(temp)); updateDisplay(temp);};}
+		
+		if (sIOshouldBeConnected) {
+			if (!sIOclient.connected()) {sIOclient.disconnect(); sIOshouldBeConnected=false;} 
+			else {sIOclient.heartbeat(1);}
+		}
+		if (!sIOshouldBeConnected) {blink(5,50); Serial.println();Serial.println("Not connected to SocketIO-server "+String(host)); connectToSocketIO();}
+	}
+
+	if (sIOshouldBeConnected && sIOclient.monitor())
+	{
+		blink(1,50);
+		Serial.print(RID+", ");
+		Serial.print(Rname+", ");
+		Serial.println(Rcontent);
+		if (Rname=="time") {art_z=0; display.showNumberDecEx(Rcontent.toInt(), 0b01000000, true, 4, 0);}
+	}
 
 	WiFiClient client = server.available();
 	if (client) {                         
@@ -72,6 +114,7 @@ void loop(){
 							client.println("Content-type:text/html");
 							client.println();
 							client.print(res);
+							Serial.print('*');
 							blink(1,50);
 						}
 						break;
@@ -86,6 +129,8 @@ void loop(){
 					else if (currentLine.equals("GET /ON ")) {display.setBrightness(0x00, true); res=assambleRES();}
 					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
 					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
+					else if (currentLine.equals("GET /TIME ")) {res=assambleRES(); sIOclient.send("broadcast","get","time");}
+					else if (currentLine.equals("GET /CONNECT ")) {connectToSocketIO(); res=assambleRES();}
 				}
 			}
 		}
@@ -96,7 +141,11 @@ void loop(){
 String assambleRES() {
 	++counter;
 	art(12,40);
-	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br>TEMP: "
+	String sid="not connected";
+	if (sIOshouldBeConnected) {sid=sIOclient.sid;}
+	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br><a href=\"/CONNECT\">CONNECT TO SERVER</a><br><a href=\"/TIME\">REQUEST TIME</a><br>SID: "
+	+String(sid)
+	+"<br>TEMP: "
 	+String(temp)
 	+"<br>COUNTER: "
 	+String(counter)
@@ -131,7 +180,7 @@ void blink(int z, int d) {
 int read_dht22() {
 	float t = dht.readTemperature();
 	//float h = dht.readHumidity();
-	return int(t*100);
+	return int(t*10);
 }
 
 void updateDisplay(int n) {
