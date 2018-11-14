@@ -1,7 +1,8 @@
 #include <WiFi.h>
 #include "config.h"
-const char* ssid     = SSID;
-const char* password = PWD;
+char* ssid[]     = SSID;
+char* password[] = PWD;
+byte numberofssids = NUMBER_OF_SSIDS;
 WiFiServer server(80);
 byte myIP[] = IP; // { 0, 0, 0, 0 }
 IPAddress local_IP(myIP[0],myIP[1],myIP[2],myIP[3]);
@@ -47,24 +48,37 @@ void setup()
 	display.setBrightness(0x00, true);
 	uint8_t data[] = { 0b01001001, 0b01001001, 0b01001001, 0b01001001 };
 	display.setSegments(data);
-	if (myIP[3]>0) {if (!WiFi.config(local_IP, gateway, subnet)) {Serial.println("STA Failed to configure");}}
-	Serial.print("Connecting to ");
-	Serial.print(ssid);
-	WiFi.begin(ssid, password);
-	while (WiFi.status() != WL_CONNECTED) {delay(500); Serial.print(".");}
-	Serial.print("WiFi connected. IP address: ");
-	Serial.println(WiFi.localIP());
-	String ip=WiFi.localIP().toString(); ip=ip.substring(ip.lastIndexOf('.')+1,ip.length());
-	display.showNumberDecEx(ip.toInt(), 0b00000000, false, 4, 0);
-	
-	connectToSocketIO();
-
-	blink(1,800);
-	server.begin();
 	dht.begin();
+	byte i=0;
+	while (i<numberofssids && !connectWiFi(ssid[i],password[i])) {
+		Serial.println("Failed to connect to WiFi "+String(ssid[i]));
+		i++;
+	}
 }
 
-void connectToSocketIO() {
+bool connectWiFi(char* ssid,char* password) {
+	if (myIP[3]>0) {if (!WiFi.config(local_IP, gateway, subnet)) {Serial.println("STA Failed to configure");}}
+	Serial.print("Connecting to WiFi "+String(ssid));
+	WiFi.begin(ssid, password);
+	int wait=10;
+	while (WiFi.status() != WL_CONNECTED && wait>0) {wait--; delay(500); Serial.print(".");}
+
+	if (WiFi.status()==WL_CONNECTED) {
+		Serial.print("WiFi connected. IP address: ");
+		Serial.println(WiFi.localIP());
+		String ip=WiFi.localIP().toString(); ip=ip.substring(ip.lastIndexOf('.')+1,ip.length());
+		display.showNumberDecEx(ip.toInt(), 0b00000000, false, 4, 0);
+		server.begin();
+		connectSocketIO();
+		blink(1,800);
+		return true;	
+	} else {
+		blink(2,100);
+		return false;
+	}
+}
+
+void connectSocketIO() {
 	if (sIOshouldBeConnected) {sIOclient.disconnect();}
 	if (!sIOclient.connect(host, port)) {
 		Serial.println("Failed to connect to SocketIO-server "+String(host));
@@ -86,7 +100,7 @@ void loop(){
 			if (!sIOclient.connected()) {sIOclient.disconnect(); sIOshouldBeConnected=false;} 
 			else {sIOclient.heartbeat(1);}
 		}
-		if (!sIOshouldBeConnected) {blink(5,50); Serial.println();Serial.println("Not connected to SocketIO-server "+String(host)); connectToSocketIO();}
+		if (!sIOshouldBeConnected) {blink(5,50); Serial.println();Serial.println("Not connected to SocketIO-server "+String(host)); connectSocketIO();}
 	}
 
 	if (sIOshouldBeConnected && sIOclient.monitor())
@@ -130,7 +144,7 @@ void loop(){
 					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
 					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
 					else if (currentLine.equals("GET /TIME ")) {res=assambleRES(); sIOclient.send("broadcast","get","time");}
-					else if (currentLine.equals("GET /CONNECT ")) {connectToSocketIO(); res=assambleRES();}
+					else if (currentLine.equals("GET /CONNECT ")) {connectSocketIO(); res=assambleRES();}
 				}
 			}
 		}
