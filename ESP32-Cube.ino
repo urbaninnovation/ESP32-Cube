@@ -30,6 +30,10 @@ DHT dht(DHTPIN, DHTTYPE);
 #define DIO 21
 TM1637Display display(CLK, DIO);
 
+//DEEP SLEEP while PIN 33 is connected to GND
+//#define BUTTON_PIN_BITMASK 0x200000000 // 2^33 in hex
+RTC_DATA_ATTR int bootCount = 0;
+
 unsigned long timeflag = 0; // millis at last update
 int counter = 0; // current counter
 int temp = 0; // current temperature
@@ -45,14 +49,24 @@ void setup()
 	Serial.begin(115200);
 	pinMode(2, OUTPUT);
 	blink(2,50);
+  
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
+
 	display.setBrightness(0x00, true);
 	uint8_t data[] = { 0b01001001, 0b01001001, 0b01001001, 0b01001001 };
 	display.setSegments(data);
 	dht.begin();
-	byte i=0;
-	while (i<numberofssids && !connectWiFi(ssid[i],password[i])) {
-		Serial.println("Failed to connect to WiFi "+String(ssid[i]));
-		i++;
+
+	byte tries=0;
+	while (tries<3 && !(WiFi.status()==WL_CONNECTED)) {
+    byte i=0;
+    while (i<numberofssids && !connectWiFi(ssid[i],password[i])) {
+      Serial.println("Failed to connect to WiFi "+String(ssid[i]));
+      i++;
+    }
+    tries++;  
 	}
 }
 
@@ -144,7 +158,8 @@ void loop(){
 					else if (currentLine.equals("GET /OFF ")) {display.setBrightness(0x00, false); res=assambleRES();}
 					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
 					else if (currentLine.equals("GET /TIME ")) {res=assambleRES(); sIOclient.send("broadcast","get","time");}
-					else if (currentLine.equals("GET /CONNECT ")) {connectSocketIO(); res=assambleRES();}
+          else if (currentLine.equals("GET /CONNECT ")) {connectSocketIO(); res=assambleRES();}
+          else if (currentLine.equals("GET /SLEEP")) {display.setBrightness(0x00, false); updateDisplay(0); digitalWrite(2, true); client.stop(); goToDeepSleep();}
 				}
 			}
 		}
@@ -157,7 +172,7 @@ String assambleRES() {
 	art(12,40);
 	String sid="not connected";
 	if (sIOshouldBeConnected) {sid=sIOclient.sid;}
-	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br><a href=\"/CONNECT\">CONNECT TO SERVER</a><br><a href=\"/TIME\">REQUEST TIME</a><br>SID: "
+	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br><a href=\"/SLEEP\">DEEP SLEEP (till PIN 33 not GND)</a><br><a href=\"/CONNECT\">CONNECT TO SERVER</a><br><a href=\"/TIME\">REQUEST TIME</a><br>SID: "
 	+String(sid)
 	+"<br>TEMP: "
 	+String(temp)
@@ -199,4 +214,11 @@ int read_dht22() {
 
 void updateDisplay(int n) {
 	display.showNumberDec(n, false, 4);
+}
+
+void goToDeepSleep() {
+  //DEEP SLEEP while PIN 33 is connected to GND
+  Serial.println("Going to sleep now");
+  delay(1000);
+  esp_deep_sleep_start();
 }
