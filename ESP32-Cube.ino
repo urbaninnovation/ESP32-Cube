@@ -35,7 +35,7 @@ TM1637Display display(CLK, DIO);
 RTC_DATA_ATTR int bootCount = 0;
 
 unsigned long timeflag = 0; // millis at last update
-int counter = 0; // current counter
+RTC_DATA_ATTR int counter = 0; // current counter
 int temp = 0; // current temperature
 int stepms=5000; // ms to wait between updates
 int art_z=0;
@@ -43,16 +43,21 @@ int art_d=0;
 unsigned long art_timestamp=0;
 byte art_data[] = { 0b00000001, 0b00000010, 0b00000100, 0b00001000 };
 bool sIOshouldBeConnected=false;
+bool deepsleep=false;
 
 void setup()
 {
-	Serial.begin(115200);
+  Serial.begin(115200);
 	pinMode(2, OUTPUT);
 	blink(2,50);
   
   ++bootCount;
   Serial.println("Boot number: " + String(bootCount));
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
+  //DEEP SLEEP while PIN 33 is connected to GND
+  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
+  //or while touchsensor on PIN15 isn't touched
+  touchAttachInterrupt(T3, {}, 40); // T3=PIN15, Threshold=40
+  esp_sleep_enable_touchpad_wakeup();
 
 	display.setBrightness(0x00, true);
 	uint8_t data[] = { 0b01001001, 0b01001001, 0b01001001, 0b01001001 };
@@ -159,11 +164,12 @@ void loop(){
 					else if (currentLine.equals("GET /ART ")) {res=assambleRES(); art(8480,80);}
 					else if (currentLine.equals("GET /TIME ")) {res=assambleRES(); sIOclient.send("broadcast","get","time");}
           else if (currentLine.equals("GET /CONNECT ")) {connectSocketIO(); res=assambleRES();}
-          else if (currentLine.equals("GET /SLEEP")) {display.setBrightness(0x00, false); updateDisplay(0); digitalWrite(2, true); client.stop(); goToDeepSleep();}
+          else if (currentLine.equals("GET /SLEEP")) {res=assambleRES(); deepsleep=true;}
 				}
 			}
 		}
 		client.stop();
+    if (deepsleep) {goToDeepSleep();}
 	}
 }
 
@@ -172,7 +178,9 @@ String assambleRES() {
 	art(12,40);
 	String sid="not connected";
 	if (sIOshouldBeConnected) {sid=sIOclient.sid;}
-	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br><a href=\"/SLEEP\">DEEP SLEEP (till PIN 33 not GND)</a><br><a href=\"/CONNECT\">CONNECT TO SERVER</a><br><a href=\"/TIME\">REQUEST TIME</a><br>SID: "
+	return "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body style=font-size:2em><a href=\"/\">ESP32-Cube</a> (<a href=https://github.com/urbaninnovation/ESP32-Cube>GitHub</a>)<br>LED <a href=\"/H\">ON</a> | <a href=\"/L\">OFF</a><br>DISPLAY <a href=\"/ON\">ON</a> | <a href=\"/OFF\">OFF</a><br><a href=\"/ART\">START DISPLAY ART</a><br><a href=\"/SLEEP\">DEEP SLEEP</a> ("
+	+String(bootCount)
+	+")<br><a href=\"/CONNECT\">CONNECT TO SERVER</a><br><a href=\"/TIME\">REQUEST TIME</a><br>SID: "
 	+String(sid)
 	+"<br>TEMP: "
 	+String(temp)
@@ -185,14 +193,15 @@ void art(int z, int d) {
 	if (z>0||d>0) {art_z=z; art_d=d;} 
 	else if (art_z>0) {
 		if (abs(millis()-art_timestamp)>art_d) {
-			art_z--;
 			art_timestamp=millis();
-			for (int a=0; a < 4; a++) {
-				art_data[a]=art_data[a]<<1;
-				if (art_data[a]==0b01000000) {art_data[a]=0b00000001;}
+      if (--art_z<=0) {updateDisplay(counter);}
+			else {
+        for (int a=0; a < 4; a++) {
+          art_data[a]=art_data[a]<<1;
+          if (art_data[a]==0b01000000) {art_data[a]=0b00000001;}
+        }
+			  display.setSegments(art_data);
 			}
-			display.setSegments(art_data);
-			if (art_z<=0) {updateDisplay(counter);}
 		}
 	}
 }
@@ -217,7 +226,8 @@ void updateDisplay(int n) {
 }
 
 void goToDeepSleep() {
-  //DEEP SLEEP while PIN 33 is connected to GND
+  //DEEP SLEEP while PIN 33 is connected to GND //or while touchsensor on PIN15 isn't touched
+  display.setBrightness(0x00, false); updateDisplay(0); digitalWrite(2, true); 
   Serial.println("Going to sleep now");
   delay(1000);
   esp_deep_sleep_start();
